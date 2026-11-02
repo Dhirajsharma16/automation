@@ -3,7 +3,7 @@ from functools import wraps
 from flask import Flask, jsonify, request, session, redirect
 from dotenv import load_dotenv
 load_dotenv()
-from job_engine import discover_jobs, get_jobs, approve_job, mark_posted
+from job_engine import discover_jobs, get_jobs, approve_job, mark_posted, delete_jobs
 from telegram import send_job
 app=Flask(__name__); SECRET=os.getenv('AUTOMATION_SECRET',''); ADMIN_USERNAME=os.getenv('ADMIN_USERNAME','admin'); ADMIN_PASSWORD=os.getenv('ADMIN_PASSWORD',''); app.secret_key=os.getenv('FLASK_SECRET_KEY') or SECRET; app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SECURE=True, SESSION_COOKIE_SAMESITE='Lax')
 DISCOVERY_LOCK = threading.Lock()
@@ -58,7 +58,7 @@ button{border:0;border-radius:9px;padding:10px 14px;background:var(--blue);color
 </section>
 <section class="panel"><div class="panel-head"><h3>Pending jobs</h3><label><input type="checkbox" onchange="toggleGroup(&quot;pending&quot;,this.checked)"> Select all pending</label></div><div id="pending">Loading…</div></section>
 <section class="panel"><div class="panel-head"><h3>Approved jobs</h3><label><input type="checkbox" onchange="toggleGroup(&quot;approved&quot;,this.checked)"> Select all approved</label></div><div id="approved">Loading…</div></section>
-<section class="panel"><div class="panel-head"><h3>Recently published</h3></div><div id="posted">Loading…</div></section>
+<section class="panel"><div class="panel-head"><h3>Recently published</h3><div class="actions"><label><input type="checkbox" onchange="toggleGroup(&quot;posted&quot;,this.checked)"> Select all published</label><button class="secondary" onclick="deleteSelected()">Delete selected</button><button class="secondary" onclick="deleteAllPosted()">Delete all published</button><button onclick="resendSelected()">Send selected again</button></div></div><div id="posted">Loading…</div></section>
 </main>
 <script>
 const msg=document.getElementById('message');
@@ -71,6 +71,10 @@ async function approve(id){say('Approving notice…');try{await api('/admin/ui/a
 function toggleGroup(target,checked){document.querySelectorAll('#'+target+' .job-pick').forEach(x=>x.checked=checked);}
 async function publishSelected(){const ids=[...document.querySelectorAll('.job-pick:checked')].map(x=>Number(x.value));if(!ids.length){say('Select at least one job first.');return;}if(!confirm('Send '+ids.length+' selected job(s) to Telegram?'))return;say('Publishing selected jobs…');try{const d=await api('/admin/ui/publish-selected','POST',ids);say('Published: '+d.published_ids.length+(d.failed.length?' | Failed: '+d.failed.length:''));await loadJobs();}catch(e){say(e.message);}}
 async function publishAll(){if(!confirm('Publish ALL pending and approved jobs to Telegram? This may send many messages.'))return;say('Publishing all pending and approved jobs…');try{const d=await api('/admin/ui/publish-all','POST');say('Published: '+d.published_ids.length+(d.failed.length?' | Failed: '+d.failed.length:''));await loadJobs();}catch(e){say(e.message);}}
+function selectedPosted(){return [...document.querySelectorAll('#posted .job-pick:checked')].map(x=>Number(x.value));}
+async function deleteSelected(){const ids=selectedPosted();if(!ids.length){say('Select published jobs to delete.');return;}if(!confirm('Permanently delete '+ids.length+' selected published records from the dashboard database?'))return;try{const d=await api('/admin/ui/delete-selected','POST',ids);say('Deleted '+d.deleted+' published records.');await loadJobs();}catch(e){say(e.message);}}
+async function deleteAllPosted(){if(!confirm('Permanently delete ALL published job records from the dashboard database?'))return;try{const d=await api('/admin/ui/delete-all-posted','POST');say('Deleted '+d.deleted+' published records.');await loadJobs();}catch(e){say(e.message);}}
+async function resendSelected(){const ids=selectedPosted();if(!ids.length){say('Select published jobs to send again.');return;}if(!confirm('Send '+ids.length+' selected published job(s) to Telegram again? This will create duplicate messages.'))return;try{const d=await api('/admin/ui/resend-selected','POST',ids);say('Sent again: '+d.sent_ids.length+(d.failed.length?' | Failed: '+d.failed.length:''));}catch(e){say(e.message);}}
 async function loadJobs(){try{const d=await api('/admin/ui/jobs');const jobs=d.jobs;const pending=jobs.filter(x=>x.status==='pending'),approved=jobs.filter(x=>x.status==='approved'),posted=jobs.filter(x=>x.status==='posted');document.getElementById('pendingCount').textContent=pending.length;document.getElementById('approvedCount').textContent=approved.length;document.getElementById('postedCount').textContent=posted.length;renderList('pending',pending,true);renderList('approved',approved,false);renderList('posted',posted,false);}catch(e){say(e.message);}}
 loadJobs();
 </script></body></html>"""
@@ -193,6 +197,45 @@ def ui_publish_all():
             app.logger.exception('Bulk Telegram publish failed for job %s',job['id'])
             failed.append({'id':job['id'],'error':str(exc)})
     return jsonify({'ok':not failed,'published_ids':sent,'failed':failed})
+
+@app.post('/admin/ui/delete-selected')
+@require_basic_auth
+def ui_delete_selected():
+    ids=request.get_json(silent=True)
+    if not isinstance(ids,list) or not ids or len(ids)>2000 or any(not isinstance(i,int) or i<1 for i in ids):
+        return jsonify({'ok':False,'error':'Select valid published jobs.'}),400
+    posted_ids={j['id'] for j in get_jobs(status='posted',limit=2000)}
+    targets=list(dict.fromkeys(i for i in ids if i in posted_ids))
+    deleted=delete_jobs(targets)
+    return jsonify({'ok':True,'deleted':deleted})
+
+@app.post('/admin/ui/delete-all-posted')
+@require_basic_auth
+def ui_delete_all_posted():
+    ids=[j['id'] for j in get_jobs(status='posted',limit=2000)]
+    deleted=delete_jobs(ids)
+    return jsonify({'ok':True,'deleted':deleted})
+
+@app.post('/admin/ui/resend-selected')
+@require_basic_auth
+def ui_resend_selected():
+    ids=request.get_json(silent=True)
+    if not isinstance(ids,list) or not ids or len(ids)>2000 or any(not isinstance(i,int) or i<1 for i in ids):
+        return jsonify({'ok':False,'error':'Select valid published jobs.'}),400
+    by_id={j['id']:j for j in get_jobs(status='posted',limit=2000)}
+    sent=[]; failed=[]
+    for job_id in dict.fromkeys(ids):
+        job=by_id.get(job_id)
+        if not job:
+            failed.append({'id':job_id,'error':'Published job not found'})
+            continue
+        try:
+            send_job(job)
+            sent.append(job_id)
+        except Exception as exc:
+            app.logger.exception('Telegram resend failed for job %s',job_id)
+            failed.append({'id':job_id,'error':str(exc)})
+    return jsonify({'ok':not failed,'sent_ids':sent,'failed':failed})
 
 @app.post('/admin/ui/publish')
 @require_basic_auth
