@@ -52,23 +52,25 @@ button{border:0;border-radius:9px;padding:10px 14px;background:var(--blue);color
 <div class="stat"><div class="stat-label">PUBLISHED</div><div class="stat-value" id="postedCount">—</div><small>Sent to Telegram</small></div>
 </div>
 <section class="panel"><div class="panel-head"><div><h3>Automation controls</h3><p class="muted">Search official sources, refresh the queue, or publish approved notices.</p></div></div>
-<div class="actions"><button id="searchBtn" onclick="runSearch()">↻ Search for new jobs</button><button class="secondary" onclick="loadJobs()">Refresh queue</button><button class="secondary" onclick="publishApproved()">Publish approved</button></div>
+<div class="actions"><button id="searchBtn" onclick="runSearch()">↻ Search for new jobs</button><button class="secondary" onclick="loadJobs()">Refresh queue</button><button class="secondary" onclick="publishSelected()">Publish selected</button><button onclick="publishAll()">Publish all pending + approved</button></div>
 <p id="message" class="status" role="status" aria-live="polite">Ready. Publishing always requires your approval.</p>
 <div class="hint">Password reminder: your login is the TechTis brand name followed by your chosen four-digit code. Keep this hint private.</div>
 </section>
-<section class="panel"><div class="panel-head"><h3>Pending jobs</h3></div><div id="pending">Loading…</div></section>
-<section class="panel"><div class="panel-head"><h3>Approved jobs</h3></div><div id="approved">Loading…</div></section>
+<section class="panel"><div class="panel-head"><h3>Pending jobs</h3><label><input type="checkbox" onchange="toggleGroup(&quot;pending&quot;,this.checked)"> Select all pending</label></div><div id="pending">Loading…</div></section>
+<section class="panel"><div class="panel-head"><h3>Approved jobs</h3><label><input type="checkbox" onchange="toggleGroup(&quot;approved&quot;,this.checked)"> Select all approved</label></div><div id="approved">Loading…</div></section>
 <section class="panel"><div class="panel-head"><h3>Recently published</h3></div><div id="posted">Loading…</div></section>
 </main>
 <script>
 const msg=document.getElementById('message');
 async function logout(){await fetch('/logout',{method:'POST'});location.href='/login';}
-async function api(path,method='GET'){const r=await fetch(path,{method,credentials:'same-origin',headers:{'Accept':'application/json'}});const raw=await r.text();let data;try{data=JSON.parse(raw);}catch(_){throw new Error('Server HTTP '+r.status+': '+raw.slice(0,180).replace(/\\s+/g,' '));}if(!r.ok)throw new Error(data.error||('HTTP '+r.status));return data;}
+async function api(path,method='GET',body=null){const headers={'Accept':'application/json'};if(body!==null)headers['Content-Type']='application/json';const r=await fetch(path,{method,credentials:'same-origin',headers,body:body===null?undefined:JSON.stringify(body)});const raw=await r.text();let data;try{data=JSON.parse(raw);}catch(_){throw new Error('Server HTTP '+r.status+': '+raw.slice(0,180).replace(/\\s+/g,' '));}if(!r.ok)throw new Error(data.error||('HTTP '+r.status));return data;}
 function say(t){msg.textContent=t;}
-function renderList(target,items,canApprove){const el=document.getElementById(target);el.replaceChildren();if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='Nothing to show here yet.';el.append(empty);return;}for(const j of items){const div=document.createElement('div');div.className='job';const title=document.createElement('strong');title.textContent=j.title;const meta=document.createElement('p');meta.className='status';meta.textContent=(j.source||'Official source')+' · '+(j.published||'Date not listed')+' · '+j.status;const link=document.createElement('a');link.href=j.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent='View official notice ↗';div.append(title,meta,link);if(j.summary){const p=document.createElement('p');p.textContent=j.summary;div.append(p);}if(canApprove){const b=document.createElement('button');b.textContent='Approve notice';b.style.marginTop='10px';b.onclick=()=>approve(j.id);div.append(b);}el.append(div);}}
+function renderList(target,items,canApprove){const el=document.getElementById(target);el.replaceChildren();if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='Nothing to show here yet.';el.append(empty);return;}for(const j of items){const div=document.createElement('div');div.className='job';const pick=document.createElement('input');pick.type='checkbox';pick.className='job-pick';pick.value=j.id;div.append(pick);const title=document.createElement('strong');title.textContent=j.title;const meta=document.createElement('p');meta.className='status';meta.textContent=(j.source||'Official source')+' · '+(j.published||'Date not listed')+' · '+j.status;const link=document.createElement('a');link.href=j.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent='View official notice ↗';div.append(title,meta,link);if(j.summary){const p=document.createElement('p');p.textContent=j.summary;div.append(p);}if(canApprove){const b=document.createElement('button');b.textContent='Approve notice';b.style.marginTop='10px';b.onclick=()=>approve(j.id);div.append(b);}el.append(div);}}
 async function runSearch(){const b=document.getElementById('searchBtn');b.disabled=true;say('Search started. Checking official sources…');try{await api('/admin/ui/run','POST');for(let i=0;i<90;i++){await new Promise(resolve=>setTimeout(resolve,2000));const s=await api('/admin/ui/run-status');if(!s.running){if(s.error)say('Search failed: '+s.error);else if(s.result)say('Search complete. Sources checked: '+s.result.sources_checked+', new jobs: '+s.result.new_items+(s.result.errors.length?' | Errors: '+s.result.errors.join('; '):''));else say('Search finished.');await loadJobs();return;}}say('Search is still running. Refresh the queue in a moment.');}catch(e){say(e.message);}finally{b.disabled=false;}}
 async function approve(id){say('Approving notice…');try{await api('/admin/ui/approve/'+id,'POST');say('Notice approved.');await loadJobs();}catch(e){say(e.message);}}
-async function publishApproved(){if(!confirm('Publish all approved jobs to Telegram?'))return;say('Publishing approved notices…');try{const d=await api('/admin/ui/publish','POST');say('Published: '+d.published_ids.length+(d.failed.length?' | Failed: '+d.failed.length:''));await loadJobs();}catch(e){say(e.message);}}
+function toggleGroup(target,checked){document.querySelectorAll('#'+target+' .job-pick').forEach(x=>x.checked=checked);}
+async function publishSelected(){const ids=[...document.querySelectorAll('.job-pick:checked')].map(x=>Number(x.value));if(!ids.length){say('Select at least one job first.');return;}if(!confirm('Send '+ids.length+' selected job(s) to Telegram?'))return;say('Publishing selected jobs…');try{const d=await api('/admin/ui/publish-selected','POST',ids);say('Published: '+d.published_ids.length+(d.failed.length?' | Failed: '+d.failed.length:''));await loadJobs();}catch(e){say(e.message);}}
+async function publishAll(){if(!confirm('Publish ALL pending and approved jobs to Telegram? This may send many messages.'))return;say('Publishing all pending and approved jobs…');try{const d=await api('/admin/ui/publish-all','POST');say('Published: '+d.published_ids.length+(d.failed.length?' | Failed: '+d.failed.length:''));await loadJobs();}catch(e){say(e.message);}}
 async function loadJobs(){try{const d=await api('/admin/ui/jobs');const jobs=d.jobs;const pending=jobs.filter(x=>x.status==='pending'),approved=jobs.filter(x=>x.status==='approved'),posted=jobs.filter(x=>x.status==='posted');document.getElementById('pendingCount').textContent=pending.length;document.getElementById('approvedCount').textContent=approved.length;document.getElementById('postedCount').textContent=posted.length;renderList('pending',pending,true);renderList('approved',approved,false);renderList('posted',posted,false);}catch(e){say(e.message);}}
 loadJobs();
 </script></body></html>"""
@@ -149,6 +151,48 @@ def ui_run_status():
 def ui_approve(job_id):
     changed = approve_job(job_id)
     return jsonify({'ok': changed}), (200 if changed else 404)
+
+@app.post('/admin/ui/publish-selected')
+@require_basic_auth
+def ui_publish_selected():
+    ids=request.get_json(silent=True)
+    if not isinstance(ids,list) or not ids:
+        return jsonify({'ok':False,'error':'Select at least one job.'}),400
+    if len(ids)>2000 or any(not isinstance(i,int) or i<1 for i in ids):
+        return jsonify({'ok':False,'error':'Invalid selection.'}),400
+    by_id={j['id']:j for j in get_jobs(limit=2000)}
+    sent=[]; failed=[]
+    for job_id in dict.fromkeys(ids):
+        job=by_id.get(job_id)
+        if not job or job['status'] not in ('pending','approved'):
+            failed.append({'id':job_id,'error':'Job not found or already published'})
+            continue
+        try:
+            if job['status']=='pending': approve_job(job_id)
+            send_job(job)
+            mark_posted(job_id)
+            sent.append(job_id)
+        except Exception as exc:
+            app.logger.exception('Selected Telegram publish failed for job %s',job_id)
+            failed.append({'id':job_id,'error':str(exc)})
+    return jsonify({'ok':not failed,'published_ids':sent,'failed':failed})
+
+@app.post('/admin/ui/publish-all')
+@require_basic_auth
+def ui_publish_all():
+    jobs=get_jobs(limit=2000)
+    sent=[]; failed=[]
+    for job in jobs:
+        if job['status'] not in ('pending','approved'): continue
+        try:
+            if job['status']=='pending': approve_job(job['id'])
+            send_job(job)
+            mark_posted(job['id'])
+            sent.append(job['id'])
+        except Exception as exc:
+            app.logger.exception('Bulk Telegram publish failed for job %s',job['id'])
+            failed.append({'id':job['id'],'error':str(exc)})
+    return jsonify({'ok':not failed,'published_ids':sent,'failed':failed})
 
 @app.post('/admin/ui/publish')
 @require_basic_auth
