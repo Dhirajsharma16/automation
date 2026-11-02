@@ -19,6 +19,19 @@ def require_secret(fn):
 def home(): return jsonify({'service':'TechTis Sarkari Naukari Automation','status':'running','scheduler':'External cron-job.org','discovery_interval':'3 hours','publishing':'Manual approval required'})
 @app.get('/health')
 def health(): return jsonify({'ok':True,'service':'techtis-job-automation'})
+@app.get('/admin/db-check')
+@require_secret
+def db_check():
+    try:
+        from db import connection, execute
+        with connection() as conn:
+            row = execute(conn, 'SELECT COUNT(*) AS total FROM jobs').fetchone()
+            total = row['total'] if hasattr(row, '__getitem__') else row[0]
+        return jsonify({'ok': True, 'database': 'connected', 'jobs_table': 'available', 'total_jobs': total})
+    except Exception as exc:
+        app.logger.exception('Database check failed')
+        return jsonify({'ok': False, 'error': str(exc)}), 500
+
 @app.post('/run')
 @require_secret
 def run_discovery():
