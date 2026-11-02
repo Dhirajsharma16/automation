@@ -122,3 +122,11 @@ def mark_posted(job_id):
     with connection() as conn:
         execute(conn, "UPDATE jobs SET status='posted', posted_at=? WHERE id=? AND status='approved'",
                 (datetime.now(timezone.utc).isoformat(), job_id))
+
+def delete_jobs(job_ids):
+    if not job_ids:
+        return 0
+    with connection() as conn:
+        placeholders = ','.join(['?'] * len(job_ids))
+        cur = execute(conn, f"DELETE FROM jobs WHERE id IN ({placeholders})", tuple(job_ids))
+        return cur.rowcount or 0
