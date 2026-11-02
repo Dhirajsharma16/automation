@@ -1,10 +1,10 @@
 {
   "sources": [
     {
-      "name": "ADD_VERIFIED_OFFICIAL_SOURCE",
+      "name": "Income Tax Department - Official Recruitment Notices",
       "type": "rss",
-      "url": "ADD_REAL_OFFICIAL_RSS_OR_ATOM_URL",
-      "enabled": false
+      "url": "https://wm.incometaxindia.gov.in/recruitment-notices-rss-feed/-/asset_publisher/bxhj/rss",
+      "enabled": true
     }
   ]
 }
