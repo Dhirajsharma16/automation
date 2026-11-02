@@ -43,6 +43,16 @@ def db_check():
         app.logger.exception('Database check failed')
         return jsonify({'ok': False, 'error': str(exc)}), 500
 
+@app.post('/admin/test-telegram')
+@require_secret
+def test_telegram():
+    try:
+        send_job({'title': 'Test message: TechTis Sarkari Naukari bot is connected', 'source': 'TechTis setup test', 'published': '', 'summary': '', 'url': 'https://techtis.in'})
+        return jsonify({'ok': True, 'message': 'Telegram test message sent'})
+    except Exception as exc:
+        app.logger.exception('Telegram test failed')
+        return jsonify({'ok': False, 'error': str(exc)}), 500
+
 @app.post('/run')
 @require_secret
 def run_discovery():
