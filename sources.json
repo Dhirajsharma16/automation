@@ -1,0 +1,10 @@
+{
+  "sources": [
+    {
+      "name": "ADD_VERIFIED_OFFICIAL_SOURCE",
+      "type": "rss",
+      "url": "ADD_REAL_OFFICIAL_RSS_OR_ATOM_URL",
+      "enabled": false
+    }
+  ]
+}
