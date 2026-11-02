@@ -6,13 +6,8 @@ create table if not exists public.jobs (
     summary text,
     published text,
     discovered_at timestamptz not null default now(),
-    status text not null default 'pending'
-        check (status in ('pending', 'approved', 'posted')),
+    status text not null default 'pending' check (status in ('pending', 'approved', 'posted')),
     posted_at timestamptz
 );
-
 create index if not exists jobs_status_idx on public.jobs(status);
 create index if not exists jobs_discovered_at_idx on public.jobs(discovered_at desc);
-
--- The app connects using a server-side Postgres connection string.
--- Do not expose database credentials in a browser or public repository.
