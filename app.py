@@ -19,6 +19,17 @@ def require_secret(fn):
 def home(): return jsonify({'service':'TechTis Sarkari Naukari Automation','status':'running','scheduler':'External cron-job.org','discovery_interval':'3 hours','publishing':'Manual approval required'})
 @app.get('/health')
 def health(): return jsonify({'ok':True,'service':'techtis-job-automation'})
+@app.get('/db-health')
+def public_db_health():
+    try:
+        from db import connection, execute
+        with connection() as conn:
+            execute(conn, 'SELECT 1').fetchone()
+        return jsonify({'ok': True, 'database': 'connected'})
+    except Exception:
+        app.logger.exception('Public database health check failed')
+        return jsonify({'ok': False, 'database': 'connection_failed'}), 500
+
 @app.get('/admin/db-check')
 @require_secret
 def db_check():
