@@ -1,12 +1,44 @@
 import os, requests
 
 def send_job(job):
-    token=os.getenv('TELEGRAM_BOT_TOKEN','').strip(); chat_id=os.getenv('TELEGRAM_CHAT_ID','').strip()
-    if not token or not chat_id: raise RuntimeError('Telegram credentials are missing.')
-    summary=(job.get('summary') or '').strip()
-    if len(summary)>650: summary=summary[:647]+'...'
-    message=('🚨 GOVERNMENT JOB UPDATE\n\n'+f"📌 {job['title']}\n🏛️ Source: {job['source']}\n📅 Published: {job.get('published') or 'See official notification'}\n\n"+(f'{summary}\n\n' if summary else '')+f"🔗 Official notice / source:\n{job['url']}\n\n"+'Please verify eligibility, vacancies, dates and fees in the original official notification.\n\n🌐 TechTis.in | Sarkari Naukari')
-    response=requests.post(f'https://api.telegram.org/bot{token}/sendMessage',json={'chat_id':chat_id,'text':message,'disable_web_page_preview':False},timeout=25)
-    response.raise_for_status(); data=response.json()
-    if not data.get('ok'): raise RuntimeError(f'Telegram API error: {data}')
+    token = os.getenv('TELEGRAM_BOT_TOKEN', '').strip()
+    chat_id = os.getenv('TELEGRAM_CHAT_ID', '').strip()
+    if not token or not chat_id:
+        raise RuntimeError('Telegram credentials are missing.')
+
+    summary = (job.get('summary') or '').strip()
+    if len(summary) > 650:
+        summary = summary[:647] + '...'
+
+    message = (
+        '🚨 GOVERNMENT JOB UPDATE\n\n'
+        + f"📌 {job['title']}\n"
+        + f"🏛️ Source: {job['source']}\n"
+        + f"📅 Published: {job.get('published') or 'See official notification'}\n\n"
+        + (f'{summary}\n\n' if summary else '')
+        + f"🔗 Official notice / source:\n{job['url']}\n\n"
+        + 'Please verify eligibility, vacancies, dates and fees in the original official notification.\n\n'
+        + '🌐 TechTis.in | Sarkari Naukari'
+    )
+
+    try:
+        response = requests.post(
+            f'https://api.telegram.org/bot{token}/sendMessage',
+            json={'chat_id': chat_id, 'text': message, 'disable_web_page_preview': False},
+            timeout=25
+        )
+    except requests.RequestException as exc:
+        # Never include the request URL because it contains the bot token.
+        raise RuntimeError(f'Could not reach Telegram API ({type(exc).__name__}).') from None
+
+    try:
+        data = response.json()
+    except ValueError:
+        raise RuntimeError(f'Telegram returned an unexpected response (HTTP {response.status_code}).') from None
+
+    if response.status_code >= 400 or not data.get('ok'):
+        description = data.get('description', 'Telegram rejected the request')
+        error_code = data.get('error_code', response.status_code)
+        raise RuntimeError(f'Telegram error {error_code}: {description}')
+
     return data
