@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from job_engine import discover_jobs, get_jobs, approve_job, mark_posted
 from telegram import send_job
-app=Flask(__name__); SECRET=os.getenv('AUTOMATION_SECRET','')
+app=Flask(__name__); SECRET=os.getenv('AUTOMATION_SECRET',''); ADMIN_USERNAME=os.getenv('ADMIN_USERNAME','admin'); ADMIN_PASSWORD=os.getenv('ADMIN_PASSWORD','')
 DISCOVERY_LOCK = threading.Lock()
 DISCOVERY_STATE = {'running': False, 'result': None, 'error': None}
 
@@ -22,8 +22,8 @@ def require_basic_auth(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
         auth = request.authorization
-        supplied = auth.password if auth and auth.username == 'admin' else ''
-        if not SECRET or not supplied or not hmac.compare_digest(supplied, SECRET):
+        supplied = auth.password if auth and auth.username == ADMIN_USERNAME else ''
+        if not ADMIN_PASSWORD or not supplied or not hmac.compare_digest(supplied, ADMIN_PASSWORD):
             response = jsonify({'ok': False, 'error': 'Login required'})
             response.status_code = 401
             response.headers['WWW-Authenticate'] = 'Basic realm="TechTis Admin", charset="UTF-8"'
@@ -35,33 +35,45 @@ DASHBOARD_HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>TechTis | Sarkari Naukari Admin</title>
 <style>
-body{font-family:Arial,sans-serif;background:#f5f7fb;color:#172033;margin:0;padding:24px}
-main{max-width:950px;margin:auto}.card{background:white;border:1px solid #e3e8f0;border-radius:12px;padding:18px;margin:14px 0}
-h1{font-size:25px}.muted{color:#667085}.actions{display:flex;gap:10px;flex-wrap:wrap}
-button{border:0;border-radius:8px;padding:11px 15px;background:#175cd3;color:white;cursor:pointer}
-button.secondary{background:#475467}button:disabled{opacity:.5;cursor:wait}
-.job{border-top:1px solid #eaecf0;padding:14px 0}.job a{color:#175cd3;overflow-wrap:anywhere}
-.status{font-size:13px;color:#667085}pre{white-space:pre-wrap;overflow-wrap:anywhere}
-</style></head><body><main>
-<h1>TechTis Sarkari Naukari</h1><p class="muted">Private admin dashboard. Jobs stay pending until you approve them.</p>
-<section class="card"><div class="actions">
-<button onclick="runSearch()">Search for new jobs</button>
-<button class="secondary" onclick="loadJobs()">Refresh jobs</button>
-<button class="secondary" onclick="publishApproved()">Publish approved jobs</button>
-</div><p id="message" class="status">Ready.</p></section>
-<section class="card"><h2>Pending jobs</h2><div id="pending">Loading…</div></section>
-<section class="card"><h2>Approved jobs</h2><div id="approved">Loading…</div></section>
-<section class="card"><h2>Recently posted</h2><div id="posted">Loading…</div></section>
+:root{color-scheme:light;--ink:#172033;--muted:#667085;--line:#e7ebf2;--blue:#315efb;--navy:#101b35;--bg:#f4f6fb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.topbar{background:var(--navy);color:#fff;padding:22px max(22px,calc((100% - 1120px)/2));display:flex;align-items:center;justify-content:space-between;gap:16px}
+.brand{display:flex;align-items:center;gap:12px}.logo{width:42px;height:42px;border-radius:13px;background:#315efb;display:grid;place-items:center;font-weight:800;font-size:18px}.brand h1{font-size:18px;margin:0}.brand p{margin:2px 0 0;color:#b9c4dc;font-size:12px}
+.live{font-size:12px;color:#b7f7d1;background:#173c37;border:1px solid #286454;padding:6px 10px;border-radius:20px}
+main{max-width:1120px;margin:28px auto;padding:0 20px 48px}.intro{display:flex;justify-content:space-between;align-items:end;gap:18px;margin-bottom:20px}.intro h2{font-size:24px;margin:0 0 4px;letter-spacing:-.5px}.muted{color:var(--muted);margin:0}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:18px 0}.stat,.panel{background:#fff;border:1px solid var(--line);border-radius:15px;box-shadow:0 3px 12px #15254b08}.stat{padding:18px}.stat-label{color:var(--muted);font-size:12px;font-weight:600}.stat-value{font-size:28px;font-weight:750;letter-spacing:-1px;margin-top:4px}.stat small{color:var(--muted)}
+.panel{padding:20px;margin:16px 0}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.panel h3{font-size:16px;margin:0}.actions{display:flex;gap:9px;flex-wrap:wrap}
+button{border:0;border-radius:9px;padding:10px 14px;background:var(--blue);color:white;font-weight:650;font-size:13px;cursor:pointer;transition:.15s}button:hover{filter:brightness(.94);transform:translateY(-1px)}button.secondary{background:#eef2ff;color:#3049a5}button:disabled{opacity:.5;cursor:wait;transform:none}
+.status{font-size:12px;color:var(--muted);margin:12px 0 0}.hint{font-size:12px;color:#667085;background:#f8f9fc;border:1px dashed #d8deea;border-radius:9px;padding:10px 12px;margin-top:14px}
+.job{border-top:1px solid var(--line);padding:15px 0}.job strong{font-size:14px}.job a{color:#315efb;text-decoration:none;font-weight:600;overflow-wrap:anywhere}.job a:hover{text-decoration:underline}.job p{margin:7px 0;color:#475467}.job .status{font-size:12px;color:var(--muted);margin:5px 0 8px}.empty{padding:20px 0;color:var(--muted);font-size:13px}
+@media(max-width:650px){.topbar{padding:18px 20px}.intro{display:block}.grid{grid-template-columns:1fr}.panel{padding:16px}.panel-head{align-items:flex-start;flex-direction:column}.actions button{flex:1}}
+</style></head><body>
+<header class="topbar"><div class="brand"><div class="logo">T</div><div><h1>TechTis · Sarkari Naukari</h1><p>Recruitment intelligence dashboard</p></div></div><span class="live">● System online</span></header>
+<main>
+<div class="intro"><div><h2>Admin overview</h2><p class="muted">Review official job notices and control what gets published to Telegram.</p></div></div>
+<div class="grid">
+<div class="stat"><div class="stat-label">PENDING REVIEW</div><div class="stat-value" id="pendingCount">—</div><small>Awaiting your approval</small></div>
+<div class="stat"><div class="stat-label">APPROVED</div><div class="stat-value" id="approvedCount">—</div><small>Ready to publish</small></div>
+<div class="stat"><div class="stat-label">PUBLISHED</div><div class="stat-value" id="postedCount">—</div><small>Sent to Telegram</small></div>
+</div>
+<section class="panel"><div class="panel-head"><div><h3>Automation controls</h3><p class="muted">Search official sources, refresh the queue, or publish approved notices.</p></div></div>
+<div class="actions"><button id="searchBtn" onclick="runSearch()">↻ Search for new jobs</button><button class="secondary" onclick="loadJobs()">Refresh queue</button><button class="secondary" onclick="publishApproved()">Publish approved</button></div>
+<p id="message" class="status" role="status" aria-live="polite">Ready. Publishing always requires your approval.</p>
+<div class="hint">Password reminder: your login is the TechTis brand name followed by your chosen four-digit code. Keep this hint private.</div>
+</section>
+<section class="panel"><div class="panel-head"><h3>Pending jobs</h3></div><div id="pending">Loading…</div></section>
+<section class="panel"><div class="panel-head"><h3>Approved jobs</h3></div><div id="approved">Loading…</div></section>
+<section class="panel"><div class="panel-head"><h3>Recently published</h3></div><div id="posted">Loading…</div></section>
 </main>
 <script>
 const msg=document.getElementById('message');
 async function api(path,method='GET'){const r=await fetch(path,{method,credentials:'same-origin',headers:{'Accept':'application/json'}});const raw=await r.text();let data;try{data=JSON.parse(raw);}catch(_){throw new Error('Server HTTP '+r.status+': '+raw.slice(0,180).replace(/\\s+/g,' '));}if(!r.ok)throw new Error(data.error||('HTTP '+r.status));return data;}
 function say(t){msg.textContent=t;}
-async function runSearch(){say('Search started. Checking official sources in background…');try{await api('/admin/ui/run','POST');for(let i=0;i<90;i++){await new Promise(resolve=>setTimeout(resolve,2000));const s=await api('/admin/ui/run-status');if(!s.running){if(s.error)say('Search failed: '+s.error);else if(s.result)say('Search complete. Sources checked: '+s.result.sources_checked+', new jobs: '+s.result.new_items+(s.result.errors.length?' | Errors: '+s.result.errors.join('; '):''));else say('Search finished.');await loadJobs();return;}}say('Search is still running. Press Refresh jobs in a moment.');}catch(e){say(e.message);}}
-async function approve(id){say('Approving job…');try{await api('/admin/ui/approve/'+id,'POST');say('Job approved.');await loadJobs();}catch(e){say(e.message);}}
-async function publishApproved(){if(!confirm('Publish all approved jobs to Telegram?'))return;say('Publishing approved jobs…');try{const d=await api('/admin/ui/publish','POST');say('Published: '+d.published_ids.length+(d.failed.length?' | Failed: '+d.failed.length:''));await loadJobs();}catch(e){say(e.message);}}
-function renderList(target,items,canApprove){const el=document.getElementById(target);el.replaceChildren();if(!items.length){el.textContent='No jobs here yet.';return;}for(const j of items){const div=document.createElement('div');div.className='job';const title=document.createElement('strong');title.textContent=j.title;const meta=document.createElement('p');meta.className='status';meta.textContent=(j.source||'')+' · '+(j.published||'Date not listed')+' · '+j.status;const link=document.createElement('a');link.href=j.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent='Open official notice';div.append(title,meta,link);if(j.summary){const p=document.createElement('p');p.textContent=j.summary;div.append(p);}if(canApprove){const b=document.createElement('button');b.textContent='Approve';b.onclick=()=>approve(j.id);div.append(b);}el.append(div);}}
-async function loadJobs(){try{const d=await api('/admin/ui/jobs');const jobs=d.jobs;renderList('pending',jobs.filter(x=>x.status==='pending'),true);renderList('approved',jobs.filter(x=>x.status==='approved'),false);renderList('posted',jobs.filter(x=>x.status==='posted'),false);}catch(e){say(e.message);}}
+function renderList(target,items,canApprove){const el=document.getElementById(target);el.replaceChildren();if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='Nothing to show here yet.';el.append(empty);return;}for(const j of items){const div=document.createElement('div');div.className='job';const title=document.createElement('strong');title.textContent=j.title;const meta=document.createElement('p');meta.className='status';meta.textContent=(j.source||'Official source')+' · '+(j.published||'Date not listed')+' · '+j.status;const link=document.createElement('a');link.href=j.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent='View official notice ↗';div.append(title,meta,link);if(j.summary){const p=document.createElement('p');p.textContent=j.summary;div.append(p);}if(canApprove){const b=document.createElement('button');b.textContent='Approve notice';b.style.marginTop='10px';b.onclick=()=>approve(j.id);div.append(b);}el.append(div);}}
+async function runSearch(){const b=document.getElementById('searchBtn');b.disabled=true;say('Search started. Checking official sources…');try{await api('/admin/ui/run','POST');for(let i=0;i<90;i++){await new Promise(resolve=>setTimeout(resolve,2000));const s=await api('/admin/ui/run-status');if(!s.running){if(s.error)say('Search failed: '+s.error);else if(s.result)say('Search complete. Sources checked: '+s.result.sources_checked+', new jobs: '+s.result.new_items+(s.result.errors.length?' | Errors: '+s.result.errors.join('; '):''));else say('Search finished.');await loadJobs();return;}}say('Search is still running. Refresh the queue in a moment.');}catch(e){say(e.message);}finally{b.disabled=false;}}
+async function approve(id){say('Approving notice…');try{await api('/admin/ui/approve/'+id,'POST');say('Notice approved.');await loadJobs();}catch(e){say(e.message);}}
+async function publishApproved(){if(!confirm('Publish all approved jobs to Telegram?'))return;say('Publishing approved notices…');try{const d=await api('/admin/ui/publish','POST');say('Published: '+d.published_ids.length+(d.failed.length?' | Failed: '+d.failed.length:''));await loadJobs();}catch(e){say(e.message);}}
+async function loadJobs(){try{const d=await api('/admin/ui/jobs');const jobs=d.jobs;const pending=jobs.filter(x=>x.status==='pending'),approved=jobs.filter(x=>x.status==='approved'),posted=jobs.filter(x=>x.status==='posted');document.getElementById('pendingCount').textContent=pending.length;document.getElementById('approvedCount').textContent=approved.length;document.getElementById('postedCount').textContent=posted.length;renderList('pending',pending,true);renderList('approved',approved,false);renderList('posted',posted,false);}catch(e){say(e.message);}}
 loadJobs();
 </script></body></html>"""
 
