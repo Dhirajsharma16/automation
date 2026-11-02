@@ -1,11 +1,11 @@
 import hmac, os, threading
 from functools import wraps
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, session, redirect
 from dotenv import load_dotenv
 load_dotenv()
 from job_engine import discover_jobs, get_jobs, approve_job, mark_posted
 from telegram import send_job
-app=Flask(__name__); SECRET=os.getenv('AUTOMATION_SECRET',''); ADMIN_USERNAME=os.getenv('ADMIN_USERNAME','admin'); ADMIN_PASSWORD=os.getenv('ADMIN_PASSWORD','')
+app=Flask(__name__); SECRET=os.getenv('AUTOMATION_SECRET',''); ADMIN_USERNAME=os.getenv('ADMIN_USERNAME','admin'); ADMIN_PASSWORD=os.getenv('ADMIN_PASSWORD',''); app.secret_key=os.getenv('FLASK_SECRET_KEY') or SECRET; app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SECURE=True, SESSION_COOKIE_SAMESITE='Lax')
 DISCOVERY_LOCK = threading.Lock()
 DISCOVERY_STATE = {'running': False, 'result': None, 'error': None}
 
@@ -21,13 +21,8 @@ def require_secret(fn):
 def require_basic_auth(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        auth = request.authorization
-        supplied = auth.password if auth and auth.username == ADMIN_USERNAME else ''
-        if not ADMIN_PASSWORD or not supplied or not hmac.compare_digest(supplied, ADMIN_PASSWORD):
-            response = jsonify({'ok': False, 'error': 'Login required'})
-            response.status_code = 401
-            response.headers['WWW-Authenticate'] = 'Basic realm="TechTis Admin", charset="UTF-8"'
-            return response
+        if not session.get('admin_logged_in'):
+            return jsonify({'ok': False, 'error': 'Login required'}), 401
         return fn(*args, **kwargs)
     return wrapper
 
@@ -48,7 +43,7 @@ button{border:0;border-radius:9px;padding:10px 14px;background:var(--blue);color
 .job{border-top:1px solid var(--line);padding:15px 0}.job strong{font-size:14px}.job a{color:#315efb;text-decoration:none;font-weight:600;overflow-wrap:anywhere}.job a:hover{text-decoration:underline}.job p{margin:7px 0;color:#475467}.job .status{font-size:12px;color:var(--muted);margin:5px 0 8px}.empty{padding:20px 0;color:var(--muted);font-size:13px}
 @media(max-width:650px){.topbar{padding:18px 20px}.intro{display:block}.grid{grid-template-columns:1fr}.panel{padding:16px}.panel-head{align-items:flex-start;flex-direction:column}.actions button{flex:1}}
 </style></head><body>
-<header class="topbar"><div class="brand"><div class="logo">T</div><div><h1>TechTis · Sarkari Naukari</h1><p>Recruitment intelligence dashboard</p></div></div><span class="live">● System online</span></header>
+<header class="topbar"><div class="brand"><div class="logo">T</div><div><h1>TechTis · Sarkari Naukari</h1><p>Recruitment intelligence dashboard</p></div></div><div style="display:flex;align-items:center;gap:12px"><span class="live">● System online</span><button class="secondary" style="background:#263653;color:#fff" onclick="logout()">Sign out</button></div></header>
 <main>
 <div class="intro"><div><h2>Admin overview</h2><p class="muted">Review official job notices and control what gets published to Telegram.</p></div></div>
 <div class="grid">
@@ -67,6 +62,7 @@ button{border:0;border-radius:9px;padding:10px 14px;background:var(--blue);color
 </main>
 <script>
 const msg=document.getElementById('message');
+async function logout(){await fetch('/logout',{method:'POST'});location.href='/login';}
 async function api(path,method='GET'){const r=await fetch(path,{method,credentials:'same-origin',headers:{'Accept':'application/json'}});const raw=await r.text();let data;try{data=JSON.parse(raw);}catch(_){throw new Error('Server HTTP '+r.status+': '+raw.slice(0,180).replace(/\\s+/g,' '));}if(!r.ok)throw new Error(data.error||('HTTP '+r.status));return data;}
 function say(t){msg.textContent=t;}
 function renderList(target,items,canApprove){const el=document.getElementById(target);el.replaceChildren();if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='Nothing to show here yet.';el.append(empty);return;}for(const j of items){const div=document.createElement('div');div.className='job';const title=document.createElement('strong');title.textContent=j.title;const meta=document.createElement('p');meta.className='status';meta.textContent=(j.source||'Official source')+' · '+(j.published||'Date not listed')+' · '+j.status;const link=document.createElement('a');link.href=j.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent='View official notice ↗';div.append(title,meta,link);if(j.summary){const p=document.createElement('p');p.textContent=j.summary;div.append(p);}if(canApprove){const b=document.createElement('button');b.textContent='Approve notice';b.style.marginTop='10px';b.onclick=()=>approve(j.id);div.append(b);}el.append(div);}}
@@ -77,10 +73,34 @@ async function loadJobs(){try{const d=await api('/admin/ui/jobs');const jobs=d.j
 loadJobs();
 </script></body></html>"""
 
+LOGIN_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TechTis Admin Sign in</title><style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;background:linear-gradient(135deg,#101b35,#243d72);font:14px/1.5 system-ui;color:#172033}.card{width:min(100%,410px);background:white;border-radius:20px;padding:34px;box-shadow:0 25px 70px #0005}.brand{display:flex;align-items:center;gap:12px;margin-bottom:28px}.logo{width:44px;height:44px;border-radius:13px;background:#315efb;color:white;display:grid;place-items:center;font-size:20px;font-weight:800}.brand small,.muted{color:#667085}.eyebrow{font-size:11px;letter-spacing:1.5px;color:#315efb;font-weight:800}.card h1{font-size:26px;margin:8px 0}.muted{margin:0 0 24px}.field{display:block;font-weight:650;font-size:12px;margin:15px 0 7px}input{width:100%;padding:13px;border:1px solid #d9dfeb;border-radius:10px;font:inherit}input:focus{outline:2px solid #c7d2fe;border-color:#315efb}button{width:100%;margin-top:20px;padding:13px;border:0;border-radius:10px;background:#315efb;color:white;font-weight:700;cursor:pointer}.error{color:#b42318;font-size:12px;min-height:18px;margin-top:12px}.hint{margin-top:16px;padding:11px;background:#f5f7fb;border-radius:9px;color:#667085;font-size:11px}.foot{text-align:center;color:#98a2b3;font-size:11px;margin-top:22px}</style></head><body><main class="card"><div class="brand"><div class="logo">T</div><div><b>TechTis Admin</b><br><small>Sarkari Naukari control centre</small></div></div><div class="eyebrow">SECURE ACCESS</div><h1>Welcome back</h1><p class="muted">Sign in to manage verified government job alerts.</p><form id="f"><label class="field">Username</label><input name="username" value="admin" autocomplete="username" required><label class="field">Password</label><input name="password" type="password" placeholder="Enter admin password" autocomplete="current-password" required><button>Sign in to dashboard</button><div class="error" id="err"></div></form><div class="hint">Password hint: TechTis brand name + your selected four-digit code.</div><div class="foot">Protected admin area · TechTis.in</div></main><script>document.getElementById('f').addEventListener('submit',async e=>{e.preventDefault();let x=document.getElementById('err');x.textContent='Signing in…';try{let r=await fetch('/login',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(e.target))});let d=await r.json();if(!r.ok)throw Error(d.error||'Sign in failed');location.href='/dashboard'}catch(err){x.textContent=err.message}})</script></body></html>"""
+
+@app.get('/login')
+def login_page():
+    if session.get('admin_logged_in'): return redirect('/dashboard')
+    return LOGIN_HTML, 200, {'Content-Type':'text/html; charset=utf-8'}
+
+@app.post('/login')
+def login_submit():
+    username=request.form.get('username','')
+    password=request.form.get('password','')
+    expected=ADMIN_PASSWORD or SECRET
+    if not expected or username != ADMIN_USERNAME or not hmac.compare_digest(password, expected):
+        return jsonify({'ok':False,'error':'Incorrect username or password. Check Render admin settings.'}), 401
+    session.clear()
+    session['admin_logged_in']=True
+    return jsonify({'ok':True})
+
+@app.post('/logout')
+def logout():
+    session.clear()
+    return jsonify({'ok':True})
+
 @app.get('/dashboard')
-@require_basic_auth
 def dashboard():
-    return DASHBOARD_HTML, 200, {'Content-Type': 'text/html; charset=utf-8'}
+    if not session.get('admin_logged_in'): return redirect('/login')
+    return DASHBOARD_HTML, 200, {'Content-Type':'text/html; charset=utf-8'}
 
 @app.get('/admin/ui/config')
 @require_basic_auth
