@@ -43,6 +43,31 @@ def db_check():
         app.logger.exception('Database check failed')
         return jsonify({'ok': False, 'error': str(exc)}), 500
 
+@app.get('/admin/telegram-chat-info')
+@require_secret
+def telegram_chat_info():
+    import requests
+    token = os.getenv('TELEGRAM_BOT_TOKEN', '').strip()
+    if not token:
+        return jsonify({'ok': False, 'error': 'Telegram bot token is missing'}), 400
+    try:
+        response = requests.get(f'https://api.telegram.org/bot{token}/getUpdates', timeout=20)
+        data = response.json()
+        if not data.get('ok'):
+            return jsonify({'ok': False, 'error': data.get('description', 'Telegram API error')}), 502
+        chats = []
+        for update in data.get('result', []):
+            post = update.get('channel_post') or update.get('edited_channel_post')
+            if post and post.get('chat'):
+                chat = post['chat']
+                item = {'id': chat.get('id'), 'title': chat.get('title'), 'username': chat.get('username')}
+                if item not in chats:
+                    chats.append(item)
+        return jsonify({'ok': True, 'channels_found': chats, 'hint': 'If empty, check whether the bot is an admin and send a fresh channel post, then retry.'})
+    except Exception as exc:
+        app.logger.exception('Telegram chat lookup failed')
+        return jsonify({'ok': False, 'error': f'Telegram lookup failed ({type(exc).__name__})'}), 502
+
 @app.post('/admin/test-telegram')
 @require_secret
 def test_telegram():
