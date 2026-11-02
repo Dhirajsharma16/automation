@@ -1,10 +1,14 @@
 {
   "sources": [
-    {
-      "name": "Income Tax Department - Official Recruitment Notices",
-      "type": "rss",
-      "url": "https://wm.incometaxindia.gov.in/recruitment-notices-rss-feed/-/asset_publisher/bxhj/rss",
-      "enabled": true
-    }
+    {"name":"Income Tax Department - Official Recruitment Notices","type":"rss","url":"https://wm.incometaxindia.gov.in/recruitment-notices-rss-feed/-/asset_publisher/bxhj/rss","enabled":true},
+    {"name":"SSC","type":"html","url":"https://ssc.gov.in/","enabled":true},
+    {"name":"UPSC Active Examinations","type":"html","url":"https://upsc.gov.in/examinations/active-exams","enabled":true},
+    {"name":"UPSC Recruitment Advertisements","type":"html","url":"https://upsc.gov.in/recruitment/recruitment-advertisement","enabled":true},
+    {"name":"IBPS","type":"html","url":"https://www.ibps.in/","enabled":true},
+    {"name":"SBI Careers","type":"html","url":"https://sbi.co.in/web/careers","enabled":true},
+    {"name":"RRB Chandigarh","type":"html","url":"https://www.rrbcdg.gov.in/","enabled":true},
+    {"name":"BPSC Bihar","type":"html","url":"https://bpsc.bihar.gov.in/","enabled":true},
+    {"name":"HPPSC Himachal Pradesh","type":"html","url":"https://hppsc.hp.gov.in/","enabled":true},
+    {"name":"National Career Service Government Vacancies","type":"html","url":"https://www.ncs.gov.in/pages/govt-job-vacancies.aspx","enabled":true}
   ]
 }
