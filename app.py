@@ -53,7 +53,7 @@ button.secondary{background:#475467}button:disabled{opacity:.5;cursor:wait}
 </main>
 <script>
 const msg=document.getElementById('message');
-async function api(path,method='GET'){const r=await fetch(path,{method,credentials:'same-origin'});const data=await r.json().catch(()=>({error:'Unexpected server response'}));if(!r.ok)throw new Error(data.error||('HTTP '+r.status));return data;}
+async function api(path,method='GET'){const r=await fetch(path,{method,credentials:'same-origin',headers:{'Accept':'application/json'}});const raw=await r.text();let data;try{data=JSON.parse(raw);}catch(_){throw new Error('Server HTTP '+r.status+': '+raw.slice(0,180).replace(/\\s+/g,' '));}if(!r.ok)throw new Error(data.error||('HTTP '+r.status));return data;}
 function say(t){msg.textContent=t;}
 async function runSearch(){say('Searching official feeds…');try{const d=await api('/admin/ui/run','POST');say('Search complete. Sources checked: '+d.discovery.sources_checked+', new jobs: '+d.discovery.new_items+(d.discovery.errors.length?' | Errors: '+d.discovery.errors.join('; '):''));await loadJobs();}catch(e){say(e.message);}}
 async function approve(id){say('Approving job…');try{await api('/admin/ui/approve/'+id,'POST');say('Job approved.');await loadJobs();}catch(e){say(e.message);}}
@@ -67,6 +67,20 @@ loadJobs();
 @require_basic_auth
 def dashboard():
     return DASHBOARD_HTML, 200, {'Content-Type': 'text/html; charset=utf-8'}
+
+@app.get('/admin/ui/config')
+@require_basic_auth
+def ui_config():
+    import json
+    from pathlib import Path
+    path = Path(os.getenv('SOURCES_FILE', 'sources.json'))
+    try:
+        cfg = json.loads(path.read_text(encoding='utf-8'))
+        sources = cfg.get('sources', [])
+        return jsonify({'ok': True, 'config_path': str(path), 'sources_configured': len(sources), 'sources_enabled': sum(1 for s in sources if s.get('enabled')), 'source_names': [s.get('name') for s in sources if s.get('enabled')]})
+    except Exception as exc:
+        app.logger.exception('Source config check failed')
+        return jsonify({'ok': False, 'error': f'Source config unavailable: {type(exc).__name__}: {exc}'}), 500
 
 @app.get('/admin/ui/jobs')
 @require_basic_auth
