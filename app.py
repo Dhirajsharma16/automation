@@ -15,6 +15,93 @@ def require_secret(fn):
         return fn(*args,**kwargs)
     return wrapper
 
+
+def require_basic_auth(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        auth = request.authorization
+        supplied = auth.password if auth and auth.username == 'admin' else ''
+        if not SECRET or not supplied or not hmac.compare_digest(supplied, SECRET):
+            response = jsonify({'ok': False, 'error': 'Login required'})
+            response.status_code = 401
+            response.headers['WWW-Authenticate'] = 'Basic realm="TechTis Admin", charset="UTF-8"'
+            return response
+        return fn(*args, **kwargs)
+    return wrapper
+
+DASHBOARD_HTML = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TechTis | Sarkari Naukari Admin</title>
+<style>
+body{font-family:Arial,sans-serif;background:#f5f7fb;color:#172033;margin:0;padding:24px}
+main{max-width:950px;margin:auto}.card{background:white;border:1px solid #e3e8f0;border-radius:12px;padding:18px;margin:14px 0}
+h1{font-size:25px}.muted{color:#667085}.actions{display:flex;gap:10px;flex-wrap:wrap}
+button{border:0;border-radius:8px;padding:11px 15px;background:#175cd3;color:white;cursor:pointer}
+button.secondary{background:#475467}button:disabled{opacity:.5;cursor:wait}
+.job{border-top:1px solid #eaecf0;padding:14px 0}.job a{color:#175cd3;overflow-wrap:anywhere}
+.status{font-size:13px;color:#667085}pre{white-space:pre-wrap;overflow-wrap:anywhere}
+</style></head><body><main>
+<h1>TechTis Sarkari Naukari</h1><p class="muted">Private admin dashboard. Jobs stay pending until you approve them.</p>
+<section class="card"><div class="actions">
+<button onclick="runSearch()">Search for new jobs</button>
+<button class="secondary" onclick="loadJobs()">Refresh jobs</button>
+<button class="secondary" onclick="publishApproved()">Publish approved jobs</button>
+</div><p id="message" class="status">Ready.</p></section>
+<section class="card"><h2>Pending jobs</h2><div id="pending">Loading…</div></section>
+<section class="card"><h2>Approved jobs</h2><div id="approved">Loading…</div></section>
+<section class="card"><h2>Recently posted</h2><div id="posted">Loading…</div></section>
+</main>
+<script>
+const msg=document.getElementById('message');
+async function api(path,method='GET'){const r=await fetch(path,{method,credentials:'same-origin'});const data=await r.json().catch(()=>({error:'Unexpected server response'}));if(!r.ok)throw new Error(data.error||('HTTP '+r.status));return data;}
+function say(t){msg.textContent=t;}
+async function runSearch(){say('Searching official feeds…');try{const d=await api('/admin/ui/run','POST');say('Search complete. Sources checked: '+d.discovery.sources_checked+', new jobs: '+d.discovery.new_items+(d.discovery.errors.length?' | Errors: '+d.discovery.errors.join('; '):''));await loadJobs();}catch(e){say(e.message);}}
+async function approve(id){say('Approving job…');try{await api('/admin/ui/approve/'+id,'POST');say('Job approved.');await loadJobs();}catch(e){say(e.message);}}
+async function publishApproved(){if(!confirm('Publish all approved jobs to Telegram?'))return;say('Publishing approved jobs…');try{const d=await api('/admin/ui/publish','POST');say('Published: '+d.published_ids.length+(d.failed.length?' | Failed: '+d.failed.length:''));await loadJobs();}catch(e){say(e.message);}}
+function renderList(target,items,canApprove){const el=document.getElementById(target);el.replaceChildren();if(!items.length){el.textContent='No jobs here yet.';return;}for(const j of items){const div=document.createElement('div');div.className='job';const title=document.createElement('strong');title.textContent=j.title;const meta=document.createElement('p');meta.className='status';meta.textContent=(j.source||'')+' · '+(j.published||'Date not listed')+' · '+j.status;const link=document.createElement('a');link.href=j.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent='Open official notice';div.append(title,meta,link);if(j.summary){const p=document.createElement('p');p.textContent=j.summary;div.append(p);}if(canApprove){const b=document.createElement('button');b.textContent='Approve';b.onclick=()=>approve(j.id);div.append(b);}el.append(div);}}
+async function loadJobs(){try{const d=await api('/admin/ui/jobs');const jobs=d.jobs;renderList('pending',jobs.filter(x=>x.status==='pending'),true);renderList('approved',jobs.filter(x=>x.status==='approved'),false);renderList('posted',jobs.filter(x=>x.status==='posted'),false);}catch(e){say(e.message);}}
+loadJobs();
+</script></body></html>"""
+
+@app.get('/dashboard')
+@require_basic_auth
+def dashboard():
+    return DASHBOARD_HTML, 200, {'Content-Type': 'text/html; charset=utf-8'}
+
+@app.get('/admin/ui/jobs')
+@require_basic_auth
+def ui_jobs():
+    return jsonify({'ok': True, 'jobs': get_jobs(limit=200)})
+
+@app.post('/admin/ui/run')
+@require_basic_auth
+def ui_run():
+    try:
+        return jsonify({'ok': True, 'discovery': discover_jobs()})
+    except Exception as exc:
+        app.logger.exception('Dashboard discovery failed')
+        return jsonify({'ok': False, 'error': str(exc)}), 500
+
+@app.post('/admin/ui/approve/<int:job_id>')
+@require_basic_auth
+def ui_approve(job_id):
+    changed = approve_job(job_id)
+    return jsonify({'ok': changed}), (200 if changed else 404)
+
+@app.post('/admin/ui/publish')
+@require_basic_auth
+def ui_publish():
+    sent, failed = [], []
+    for job in get_jobs(status='approved', limit=100):
+        try:
+            send_job(job)
+            mark_posted(job['id'])
+            sent.append(job['id'])
+        except Exception as exc:
+            app.logger.exception('Dashboard Telegram publish failed for job %s', job['id'])
+            failed.append({'id': job['id'], 'error': str(exc)})
+    return jsonify({'ok': not failed, 'published_ids': sent, 'failed': failed})
+
 @app.get('/')
 def home(): return jsonify({'service':'TechTis Sarkari Naukari Automation','status':'running','scheduler':'External cron-job.org','discovery_interval':'3 hours','publishing':'Manual approval required'})
 @app.get('/health')
