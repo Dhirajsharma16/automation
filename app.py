@@ -1,4 +1,4 @@
-import hmac, os
+import hmac, os, threading
 from functools import wraps
 from flask import Flask, jsonify, request
 from dotenv import load_dotenv
@@ -6,6 +6,8 @@ load_dotenv()
 from job_engine import discover_jobs, get_jobs, approve_job, mark_posted
 from telegram import send_job
 app=Flask(__name__); SECRET=os.getenv('AUTOMATION_SECRET','')
+DISCOVERY_LOCK = threading.Lock()
+DISCOVERY_STATE = {'running': False, 'result': None, 'error': None}
 
 def require_secret(fn):
     @wraps(fn)
@@ -55,7 +57,7 @@ button.secondary{background:#475467}button:disabled{opacity:.5;cursor:wait}
 const msg=document.getElementById('message');
 async function api(path,method='GET'){const r=await fetch(path,{method,credentials:'same-origin',headers:{'Accept':'application/json'}});const raw=await r.text();let data;try{data=JSON.parse(raw);}catch(_){throw new Error('Server HTTP '+r.status+': '+raw.slice(0,180).replace(/\\s+/g,' '));}if(!r.ok)throw new Error(data.error||('HTTP '+r.status));return data;}
 function say(t){msg.textContent=t;}
-async function runSearch(){say('Searching official feeds…');try{const d=await api('/admin/ui/run','POST');say('Search complete. Sources checked: '+d.discovery.sources_checked+', new jobs: '+d.discovery.new_items+(d.discovery.errors.length?' | Errors: '+d.discovery.errors.join('; '):''));await loadJobs();}catch(e){say(e.message);}}
+async function runSearch(){say('Search started. Checking official sources in background…');try{await api('/admin/ui/run','POST');for(let i=0;i<90;i++){await new Promise(resolve=>setTimeout(resolve,2000));const s=await api('/admin/ui/run-status');if(!s.running){if(s.error)say('Search failed: '+s.error);else if(s.result)say('Search complete. Sources checked: '+s.result.sources_checked+', new jobs: '+s.result.new_items+(s.result.errors.length?' | Errors: '+s.result.errors.join('; '):''));else say('Search finished.');await loadJobs();return;}}say('Search is still running. Press Refresh jobs in a moment.');}catch(e){say(e.message);}}
 async function approve(id){say('Approving job…');try{await api('/admin/ui/approve/'+id,'POST');say('Job approved.');await loadJobs();}catch(e){say(e.message);}}
 async function publishApproved(){if(!confirm('Publish all approved jobs to Telegram?'))return;say('Publishing approved jobs…');try{const d=await api('/admin/ui/publish','POST');say('Published: '+d.published_ids.length+(d.failed.length?' | Failed: '+d.failed.length:''));await loadJobs();}catch(e){say(e.message);}}
 function renderList(target,items,canApprove){const el=document.getElementById(target);el.replaceChildren();if(!items.length){el.textContent='No jobs here yet.';return;}for(const j of items){const div=document.createElement('div');div.className='job';const title=document.createElement('strong');title.textContent=j.title;const meta=document.createElement('p');meta.className='status';meta.textContent=(j.source||'')+' · '+(j.published||'Date not listed')+' · '+j.status;const link=document.createElement('a');link.href=j.url;link.target='_blank';link.rel='noopener noreferrer';link.textContent='Open official notice';div.append(title,meta,link);if(j.summary){const p=document.createElement('p');p.textContent=j.summary;div.append(p);}if(canApprove){const b=document.createElement('button');b.textContent='Approve';b.onclick=()=>approve(j.id);div.append(b);}el.append(div);}}
@@ -87,14 +89,28 @@ def ui_config():
 def ui_jobs():
     return jsonify({'ok': True, 'jobs': get_jobs(limit=200)})
 
+def _background_discovery():
+    try:
+        result = discover_jobs()
+        DISCOVERY_STATE.update({'running': False, 'result': result, 'error': None})
+    except Exception as exc:
+        app.logger.exception('Dashboard discovery failed')
+        DISCOVERY_STATE.update({'running': False, 'result': None, 'error': f'{type(exc).__name__}: {exc}'})
+
 @app.post('/admin/ui/run')
 @require_basic_auth
 def ui_run():
-    try:
-        return jsonify({'ok': True, 'discovery': discover_jobs()})
-    except Exception as exc:
-        app.logger.exception('Dashboard discovery failed')
-        return jsonify({'ok': False, 'error': str(exc)}), 500
+    with DISCOVERY_LOCK:
+        if DISCOVERY_STATE['running']:
+            return jsonify({'ok': True, 'running': True}), 202
+        DISCOVERY_STATE.update({'running': True, 'result': None, 'error': None})
+        threading.Thread(target=_background_discovery, daemon=True).start()
+    return jsonify({'ok': True, 'running': True, 'message': 'Discovery started'}), 202
+
+@app.get('/admin/ui/run-status')
+@require_basic_auth
+def ui_run_status():
+    return jsonify({'ok': True, **DISCOVERY_STATE})
 
 @app.post('/admin/ui/approve/<int:job_id>')
 @require_basic_auth
